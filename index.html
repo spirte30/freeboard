@@ -218,13 +218,15 @@
   footer code{color:var(--muted)}
 
   /* เกจ + ผังครัว */
-  .viz{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:14px;margin-bottom:14px}
+  /* สัดส่วน 1.45:1 ให้ความสูงของเกจ (ตามความกว้าง) ใกล้กับผังครัว — ลดที่ว่างบน/ล่างในการ์ดเกจ */
+  .viz{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:14px;margin-bottom:14px}
   .viz .gcard{display:flex;flex-direction:column}
+  .viz .gcard .card-head{margin-bottom:18px}  /* เท่ากับ padding ล่างของการ์ด → เกจอยู่กึ่งกลางแนวตั้ง */
   .gauges{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;flex:1;align-content:center}
-  .gauge{display:flex;flex-direction:column;align-items:center;min-width:0;cursor:pointer;border-radius:12px;padding:6px 2px 8px;
+  .gauge{display:flex;flex-direction:column;align-items:center;min-width:0;cursor:pointer;border-radius:12px;padding:7px 2px;
     border:1px solid transparent;transition:border-color .2s}
   .gauge:hover,.gauge.sel{border-color:var(--line)}
-  .gauge svg{width:100%;max-width:240px;height:auto;display:block;overflow:visible}
+  .gauge svg{width:100%;max-width:300px;height:auto;display:block;overflow:visible}
   .g-track{fill:none;stroke:var(--soft2);stroke-width:14}
   .g-zone{fill:none;stroke-width:10;opacity:.85}
   .z-ok{stroke:var(--ok)}.z-warn{stroke:var(--warn)}.z-bad{stroke:var(--bad)}
@@ -402,10 +404,10 @@
           <text class="lbl" x="132" y="130">เครื่องดูดควัน (เหนือเตา)</text>
           <text class="lbl" x="310" y="72">เคาน์เตอร์</text>
           <!-- ตู้เย็น / ช่องแช่แข็ง (แบบ side-by-side) -->
-          <rect class="furn" x="464" y="26" width="150" height="104" rx="6"/>
-          <path class="ln" d="M539 30V126"/>
-          <text class="lbl" x="501" y="122">ตู้เย็น</text>
-          <text class="lbl" x="577" y="122">ช่องแช่แข็ง</text>
+          <rect class="furn" id="fridgeBox" x="434" y="26" width="180" height="104" rx="6"/>
+          <path class="ln" id="fridgeDiv" d="M524 30V126"/>
+          <text class="lbl" data-fit="90" x="479" y="122">ตู้เย็น</text>
+          <text class="lbl" data-fit="90" x="569" y="122">ช่องแช่แข็ง</text>
           <!-- โต๊ะเตรียมอาหาร -->
           <rect class="furn" x="196" y="186" width="210" height="92" rx="10"/>
           <text class="lbl" x="301" y="204">โต๊ะเตรียมอาหาร</text>
@@ -526,7 +528,7 @@ const GAUGES = [
 /* ตำแหน่งจุดเซนเซอร์บนผังครัว (พิกัดใน viewBox 640×400) */
 const MAP_POS = {
   gas_ppm:{x:72, y:150}, pm25:{x:200, y:150},
-  fridge_temp:{x:501, y:70}, freezer_temp:{x:577, y:70},
+  fridge_temp:{x:479, y:70, fit:90}, freezer_temp:{x:569, y:70, fit:90},   // fit = ความกว้างช่อง (หน่วย viewBox)
   kitchen_temp:{x:250, y:232}, humidity:{x:352, y:232},
   power_w:{x:62, y:297}, rssi:{x:520, y:318}
 };
@@ -782,7 +784,8 @@ function buildMap(){
     svgEl("circle", {class:"pulse p2", r:9}, g);
     svgEl("circle", {class:"halo", r:15}, g);
     svgEl("circle", {class:"core", r:9}, g);
-    svgEl("text", {class:"mv", y:27}, g).textContent = "--";
+    const mv = svgEl("text", {class:"mv", y:27}, g); mv.textContent = "--";
+    if (p.fit) mv.dataset.fit = p.fit;
     if (!/^(fridge|freezer)/.test(s.key)) svgEl("text", {class:"mn", y:41}, g).textContent = SHORT[s.key];
     svgEl("title", {}, g).textContent = s.label;
     const go = () => {
@@ -791,6 +794,24 @@ function buildMap(){
     };
     g.addEventListener("click", go);
     g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  });
+  // ปรับขนาดป้ายใหม่เมื่อฟอนต์โหลดเสร็จ / ขนาดจอเปลี่ยน (สเกลของ SVG เปลี่ยน)
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitMapLabels);
+  let rq = 0;
+  window.addEventListener("resize", () => { cancelAnimationFrame(rq); rq = requestAnimationFrame(fitMapLabels); });
+  fitMapLabels();
+}
+
+/* ป้ายในช่องตู้เย็น/ช่องแช่แข็ง: ย่อฟอนต์ถ้ายาวเกินช่อง ให้เหลือระยะจากขอบช่องอย่างน้อย 6px บนจอ (ทุกความยาวค่า ทุกขนาดจอ) */
+const FIT_GAP_PX = 6;
+function fitMapLabels(){
+  const svg = $("#kmap"), k = svg.getBoundingClientRect().width / 640;   // px บนจอต่อ 1 หน่วย viewBox
+  if (!k) return;
+  svg.querySelectorAll("text[data-fit]").forEach(t => {
+    t.style.fontSize = "";
+    const maxW = +t.dataset.fit - 2 * (FIT_GAP_PX + 1) / k;          // +1px เผื่อขอบเงาตัวอักษร
+    const len = t.getComputedTextLength();
+    if (len > maxW) t.style.fontSize = (parseFloat(getComputedStyle(t).fontSize) * maxW / len).toFixed(2) + "px";
   });
 }
 
@@ -803,6 +824,7 @@ function renderMap(statuses){
     g.setAttribute("aria-label", `${s.label} ${fmt(v, s.dec)} ${s.unit} สถานะ${ST_TEXT[st]} (กดเพื่อดูกราฟ)`);
     g.querySelector("title").textContent = `${s.label}: ${fmt(v, s.dec)} ${s.unit} · ${ST_TEXT[st]}`;
   });
+  fitMapLabels();
 }
 
 /* =================== ตัวเลขนับขึ้นลงนุ่มนวล =================== */
